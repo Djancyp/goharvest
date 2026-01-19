@@ -50,8 +50,8 @@ package main
 import (
     "fmt"
     "time"
-    
-    "github.com/Djancyp/goharvest/pkg"
+
+    "github.com/Djancyp/goharvest"
 )
 
 type Product struct {
@@ -61,15 +61,15 @@ type Product struct {
 }
 
 func main() {
-    scraper := &pkg.Scrapper[Product]{
+    scraper := &goharvest.Scrapper[Product]{
         Urls: []string{"https://example.com/products"},
-        Selectors: []pkg.Selector{
+        Selectors: []goharvest.Selector{
             {
                 Name:  "Title",
                 Query: "h1.product-title",
             },
             {
-                Name:  "Price", 
+                Name:  "Price",
                 Query: ".price",
             },
             {
@@ -80,12 +80,12 @@ func main() {
         },
         RequestDelay: 1 * time.Second,
     }
-    
+
     results, err := scraper.Scrape()
     if err != nil {
         panic(err)
     }
-    
+
     for _, product := range results {
         fmt.Printf("Product: %+v\n", product)
     }
@@ -99,24 +99,24 @@ func main() {
 For JavaScript-heavy sites or when you need to perform actions before scraping:
 
 ```go
-scraper := &pkg.Scrupper[Product]{
+scraper := &goharvest.Scrupper[Product]{
     Urls: []string{"https://example.com"},
-    PreScrapeActions: []pkg.PreScrapeAction{
+    PreScrapeActions: []goharvest.PreScrapeAction{
         {
-            Type:     pkg.ClickAction,
+            Type:     goharvest.ClickAction,
             Selector: "#load-more-button",
             WaitUntil: ".new-content-loaded",
         },
         {
-            Type:     pkg.ScrollAction,
+            Type:     goharvest.ScrollAction,
             Selector: ".scroll-target",
         },
         {
-            Type:     pkg.WaitAction,
+            Type:     goharvest.WaitAction,
             Duration: 2 * time.Second,
         },
     },
-    Selectors: []pkg.Selector{
+    Selectors: []goharvest.Selector{
         {
             Name:  "Title",
             Query: "h1.title",
@@ -139,9 +139,9 @@ type Article struct {
     Links    []string `json:"links"`
 }
 
-scraper := &pkg.Scrapper[Article]{
+scraper := &goharvest.Scrapper[Article]{
     Urls: []string{"https://example.com/article"},
-    Selectors: []pkg.Selector{
+    Selectors: []goharvest.Selector{
         {
             Name:    "Headings",
             Query:   "h2, h3",
@@ -168,9 +168,9 @@ var ExtractPrice = func(sel *goquery.Selection) string {
     return strings.TrimSpace(strings.Replace(text, "$", "", -1))
 }
 
-scraper := &pkg.Scrapper[Product]{
+scraper := &goharvest.Scrapper[Product]{
     Urls: []string{"https://example.com/products"},
-    Selectors: []pkg.Selector{
+    Selectors: []goharvest.Selector{
         {
             Name:        "Price",
             Query:       ".price",
@@ -185,7 +185,7 @@ scraper := &pkg.Scrapper[Product]{
 Set custom cookies for authenticated scraping:
 
 ```go
-scraper := &pkg.Scrapper[Data]{
+scraper := &goharvest.Scrapper[Data]{
     Urls: []string{"https://example.com/protected-page"},
     Cookies: []map[string]string{
         {
@@ -197,7 +197,7 @@ scraper := &pkg.Scrapper[Data]{
             "value": "xyz789",
         },
     },
-    Selectors: []pkg.Selector{
+    Selectors: []goharvest.Selector{
         // ... your selectors
     },
 }
@@ -208,9 +208,9 @@ scraper := &pkg.Scrapper[Data]{
 For memory-efficient processing of large datasets:
 
 ```go
-scraper := &pkg.Scrapper[Product]{
+scraper := &goharvest.Scrapper[Product]{
     Urls: []string{"https://example.com/products"},
-    Selectors: []pkg.Selector{
+    Selectors: []goharvest.Selector{
         // ... your selectors
     },
 }
@@ -316,9 +316,9 @@ type NewsArticle struct {
 }
 
 func main() {
-    scraper := &pkg.Scrapper[NewsArticle]{
+    scraper := &goharvest.Scrapper[NewsArticle]{
         Urls: []string{"https://news-site.com/latest"},
-        Selectors: []pkg.Selector{
+        Selectors: []goharvest.Selector{
             {
                 Name:  "Title",
                 Query: "h1.article-title",
@@ -364,9 +364,9 @@ import (
     "fmt"
     "strings"
     "time"
-    
+
     "github.com/PuerkitoBio/goquery"
-    "github.com/Djancyp/goharvest/pkg"
+    "github.com/Djancyp/goharvest"
 )
 
 type Product struct {
@@ -384,9 +384,9 @@ var ExtractPrice = func(sel *goquery.Selection) string {
 }
 
 func main() {
-    scraper := &pkg.Scrpper[Product]{
+    scraper := &goharvest.Scrapper[Product]{
         Urls: []string{"https://shop.example.com/category/electronics"},
-        Selectors: []pkg.Selector{
+        Selectors: []goharvest.Selector{
             {
                 Name:  "Name",
                 Query: ".product-name",
