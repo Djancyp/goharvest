@@ -43,7 +43,7 @@ func TestParseWithSelectorsWithStruct(t *testing.T) {
 		},
 	}
 
-	result := scrapper.parseWithSelectors(doc, nil, "")
+	result := scrapper.parseWithSelectors(doc, nil, "", "")
 
 	assert.Equal(t, "Test Title", result.Title)
 	assert.Equal(t, "Test Content", result.Content)
@@ -75,7 +75,7 @@ func TestParseWithSelectorsWithArrays(t *testing.T) {
 		},
 	}
 
-	result := scrapper.parseWithSelectors(doc, nil, "")
+	result := scrapper.parseWithSelectors(doc, nil, "", "")
 
 	assert.Len(t, result.Items, 3)
 	assert.Contains(t, result.Items, "Item 1")
@@ -108,7 +108,7 @@ func TestParseWithSelectorsWithCustomExtraction(t *testing.T) {
 		},
 	}
 
-	result := scrapper.parseWithSelectors(doc, nil, "")
+	result := scrapper.parseWithSelectors(doc, nil, "", "")
 
 	assert.Equal(t, "Custom: Test Title", result.Title)
 }
@@ -136,7 +136,7 @@ func TestParseWithSelectorsWithMap(t *testing.T) {
 		},
 	}
 
-	result := scrapper.parseWithSelectors(doc, nil, "")
+	result := scrapper.parseWithSelectors(doc, nil, "", "")
 
 	assert.Equal(t, "Test Title", result["title"])
 	assert.Equal(t, "Test Content", result["content"])
@@ -163,7 +163,7 @@ func TestParseWithSelectorsWithMapArrays(t *testing.T) {
 		},
 	}
 
-	result := scrapper.parseWithSelectors(doc, nil, "")
+	result := scrapper.parseWithSelectors(doc, nil, "", "")
 
 	items, ok := result["items"].([]string)
 	assert.True(t, ok)
@@ -198,7 +198,7 @@ func TestParseWithSelectorsWithEmptyResults(t *testing.T) {
 		},
 	}
 
-	result := scrapper.parseWithSelectors(doc, nil, "")
+	result := scrapper.parseWithSelectors(doc, nil, "", "")
 
 	assert.Equal(t, "", result.Title)
 	assert.Equal(t, "", result.Content)
@@ -207,7 +207,7 @@ func TestParseWithSelectorsWithEmptyResults(t *testing.T) {
 // TestParseWithSelectorsWithSliceOfStructs tests the parseWithSelectors method with slice of structs
 func TestParseWithSelectorsWithSliceOfStructs(t *testing.T) {
 	type Item struct {
-		Name string `json:"name"`
+		Name  string `json:"name"`
 		Value string `json:"value"`
 	}
 
@@ -253,7 +253,7 @@ func TestParseWithSelectorsWithAttributeExtraction(t *testing.T) {
 		},
 	}
 
-	result := scrapper.parseWithSelectors(doc, nil, "")
+	result := scrapper.parseWithSelectors(doc, nil, "", "")
 
 	assert.Equal(t, "image.jpg", result.ImageSrc)
 	assert.Equal(t, "https://example.com", result.LinkHref)
@@ -291,7 +291,7 @@ func TestParseWithSelectorsWithMixedSingleAndArray(t *testing.T) {
 		},
 	}
 
-	result := scrapper.parseWithSelectors(doc, nil, "")
+	result := scrapper.parseWithSelectors(doc, nil, "", "")
 
 	assert.Equal(t, "Main Title", result.Title)
 	assert.Len(t, result.Items, 3)
@@ -299,3 +299,4 @@ func TestParseWithSelectorsWithMixedSingleAndArray(t *testing.T) {
 	assert.Contains(t, result.Items, "Item 2")
 	assert.Contains(t, result.Items, "Item 3")
 }
+

@@ -56,6 +56,7 @@ type Scrapper[T any] struct {
 	LinkHunt                    string                    // this will be a class name for a link so we can do auto click and scrapp pages
 	EachEvent                   func(T)
 	PreScrapeActions            []PreScrapeAction // Actions to perform before scraping (e.g., clicks, scrolls)
+	URLFieldName                string            // Field name to store the URL in the result (default: "URL")
 	visitedURLs                 map[string]bool   // Track URLs that have been visited to prevent duplicates
 	visitedMutex                sync.RWMutex      // Mutex to protect visitedURLs map
 }
@@ -224,7 +225,7 @@ func ExtractTextOrAttr(sel *goquery.Selection, attr string) string {
 }
 
 // parseWithSelectors uses reflection to populate type T using the struct's Selectors
-func (s *Scrapper[T]) parseWithSelectors(doc *goquery.Document, g *geziyor.Geziyor, baseUrl string) T {
+func (s *Scrapper[T]) parseWithSelectors(doc *goquery.Document, g *geziyor.Geziyor, baseUrl string, currentURL string) T {
 	var result T
 	val := reflect.ValueOf(&result).Elem()
 
@@ -359,6 +360,25 @@ func (s *Scrapper[T]) parseWithSelectors(doc *goquery.Document, g *geziyor.Geziy
 		}
 	}
 
+	// Add URL to result if URLFieldName is specified and field exists
+	if s.URLFieldName != "" {
+		if val.Kind() == reflect.Struct {
+			field := val.FieldByName(s.URLFieldName)
+			if field.IsValid() && field.CanSet() && field.Kind() == reflect.String {
+				field.SetString(currentURL)
+			}
+		} else if isSliceOfStruct {
+			// For slice of structs, add URL to all elements
+			for i := 0; i < val.Len(); i++ {
+				elem := val.Index(i)
+				field := elem.FieldByName(s.URLFieldName)
+				if field.IsValid() && field.CanSet() && field.Kind() == reflect.String {
+					field.SetString(currentURL)
+				}
+			}
+		}
+	}
+
 	// Handle LinkHunt after processing selectors
 	if s.LinkHunt != "" {
 		doc.Find(fmt.Sprintf("%s", s.LinkHunt)).Each(func(i int, selection *goquery.Selection) {
@@ -459,7 +479,7 @@ func (s *Scrapper[T]) parseWithSelectors(doc *goquery.Document, g *geziyor.Geziy
 					if s.ParseFunc != nil {
 						result = s.ParseFunc(doc)
 					} else {
-						result = s.parseWithSelectors(doc, g, baseUrl)
+						result = s.parseWithSelectors(doc, g, baseUrl, link) // Pass the link as currentURL
 					}
 					// check if the result is empty
 					if reflect.ValueOf(result).IsZero() {
@@ -635,7 +655,7 @@ func (s *Scrapper[T]) ScrapeStream() (<-chan T, error) {
 						if s.ParseFunc != nil {
 							result = s.ParseFunc(doc)
 						} else {
-							result = s.parseWithSelectors(doc, g, baseUrl)
+							result = s.parseWithSelectors(doc, g, baseUrl, u) // Pass the URL as currentURL
 						}
 
 						s.ExportChan <- result
