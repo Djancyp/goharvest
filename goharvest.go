@@ -6,7 +6,7 @@ import (
 
 // Re-export types from the pkg module
 type (
-	Scrapper[T any]       = pkg.Scrapper[T]
+	Scrapper[T any]     = pkg.Scrapper[T]
 	Selector            = pkg.Selector
 	PreScrapeAction     = pkg.PreScrapeAction
 	ExtractionFunc      = pkg.ExtractionFunc
@@ -16,18 +16,16 @@ type (
 
 // Re-export constants from the pkg module
 const (
-	ClickAction  pkg.PreScrapeActionType = iota
+	ClickAction pkg.PreScrapeActionType = iota
 	ScrollAction
 	WaitAction
 )
 
 // Re-export functions from the pkg module
 var (
-	Text       = pkg.Text
-	FirstText  = pkg.FirstText
-	HTML       = pkg.HTML
-	Attr       = pkg.Attr
+	Text              = pkg.Text
+	FirstText         = pkg.FirstText
+	HTML              = pkg.HTML
+	Attr              = pkg.Attr
 	ExtractTextOrAttr = pkg.ExtractTextOrAttr
 )
-
-
