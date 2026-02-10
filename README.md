@@ -226,6 +226,35 @@ for result := range streamChan {
 }
 ```
 
+### Keeping Browser Open
+
+By default, the browser instance is closed after scraping is complete. However, you can keep the browser open for multiple scraping operations by setting the `KeepBrowserOpen` field to `true`. This can improve performance when performing multiple scraping tasks sequentially:
+
+```go
+scraper := &goharvest.Scrapper[Product]{
+    Urls: []string{"https://example.com/products"},
+    Selectors: []goharvest.Selector{
+        // ... your selectors
+    },
+    KeepBrowserOpen: true,  // Keep browser open after scraping
+}
+
+results, err := scraper.Scrape()
+if err != nil {
+    panic(err)
+}
+
+// Perform additional scraping operations with the same browser instance
+scraper.Urls = []string{"https://example.com/other-products"}
+moreResults, err := scraper.Scrape()
+if err != nil {
+    panic(err)
+}
+
+// Manually close the browser when all scraping is complete
+scraper.CloseBrowser()
+```
+
 ## API Reference
 
 ### `Scrapper[T]` Struct
@@ -248,6 +277,7 @@ The main scraper struct that handles the scraping process for type `T`.
 - `LinkHunt string`: CSS selector for automatic link discovery
 - `EachEvent func(T)`: Callback function called for each scraped item
 - `PreScrapeActions []PreScrapeAction`: Actions to perform before scraping
+- `KeepBrowserOpen bool`: Whether to keep the browser open after scraping (default: false)
 
 ### `Selector` Struct
 
@@ -292,6 +322,10 @@ Performs the scraping and returns all results as a slice. Maintains backward com
 #### `ScrapeStream() (<-chan T, error)`
 
 Starts scraping and returns a channel that will receive results as they are scraped. Useful for memory-efficient processing of large datasets.
+
+#### `CloseBrowser()`
+
+Manually closes the browser instance if it's running. This is useful when `KeepBrowserOpen` is set to `true` and you want to explicitly close the browser when finished with all scraping operations.
 
 ## Examples
 

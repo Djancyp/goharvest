@@ -59,6 +59,7 @@ type Scrapper[T any] struct {
 	URLFieldName                string            // Field name to store the URL in the result (default: "URL")
 	visitedURLs                 map[string]bool   // Track URLs that have been visited to prevent duplicates
 	visitedMutex                sync.RWMutex      // Mutex to protect visitedURLs map
+	KeepBrowserOpen             bool              // Whether to keep the browser open after scraping (default: false)
 }
 
 // Options for configuring the scraper
@@ -687,7 +688,9 @@ func (s *Scrapper[T]) ScrapeStream() (<-chan T, error) {
 	go func() {
 		g.Start()
 		close(s.ExportChan)
-		stopBrowser()
+		if !s.KeepBrowserOpen {
+			stopBrowser()
+		}
 	}()
 
 	return s.ExportChan, nil
@@ -707,4 +710,9 @@ func (s *Scrapper[T]) Scrape() ([]T, error) {
 	}
 
 	return results, nil
+}
+
+// CloseBrowser closes the browser instance if it's running
+func (s *Scrapper[T]) CloseBrowser() {
+	stopBrowser()
 }
