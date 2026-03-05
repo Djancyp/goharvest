@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"reflect"
 	"strings"
@@ -23,9 +24,11 @@ import (
 // Global variables to manage Chromium browser process
 var (
 	browserProcess    *exec.Cmd
+	xvfbProcess       *exec.Cmd
 	browserMutex      sync.Mutex
 	browserPort       = "9222"
 	currentBrowserOps *BrowserOptions // Track current browser options
+	xvfbDisplay       = ":99"         // Xvfb display number
 )
 
 // BrowserOptions holds configuration for the Chromium browser
@@ -40,6 +43,7 @@ type BrowserOptions struct {
 	WindowSize     string // Window size in format "width,height" (default: "1920,1080")
 	Language       string // Browser language (default: "en-US,en;q=0.9")
 	Timezone       string // Timezone to emulate (default: "America/New_York")
+	UseXvfb        bool   // Use Xvfb virtual framebuffer for non-headless mode in Docker (default: false)
 
 	// Anti-detection settings
 	UserAgent      string // Custom User-Agent string
@@ -74,6 +78,7 @@ func DefaultBrowserOptions() *BrowserOptions {
 		WindowSize:             "1920,1080",
 		Language:               "en-US,en;q=0.9",
 		Timezone:               "America/New_York",
+		UseXvfb:                false,
 		UserAgent:              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
 		DisableGPU:             true,
 		EnableWebGL:            false,
@@ -101,6 +106,7 @@ func StealthBrowserOptions() *BrowserOptions {
 		WindowSize:             "1920,1080",
 		Language:               "en-US,en;q=0.9",
 		Timezone:               "America/New_York",
+		UseXvfb:                false,
 		// Realistic Chrome User-Agent
 		UserAgent:              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
 		DisableGPU:             false, // GPU enabled for realistic fingerprint
@@ -130,6 +136,40 @@ func DefaultAntiDetectionOptions() *BrowserOptions {
 		"--disable-blink-features=AutomationControlled",
 	}
 	return opts
+}
+
+// DockerBrowserOptions returns options optimized for running in Docker containers
+// with non-headless mode using Xvfb
+func DockerBrowserOptions() *BrowserOptions {
+	return &BrowserOptions{
+		Headless:               false,  // Non-headless for better compatibility
+		BrowserPath:            "chromium",
+		DebuggingPort:          "9222",
+		UserDataDir:            "/tmp/chrome-profile-docker",
+		WindowSize:             "1920,1080",
+		Language:               "en-US,en;q=0.9",
+		Timezone:               "UTC",
+		UseXvfb:                true,   // Enable Xvfb for Docker
+		UserAgent:              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+		DisableGPU:             true,   // Disable GPU in Docker
+		EnableWebGL:            false,
+		HideWebDriver:          true,
+		DisableAutomationFlags: true,
+		DisableSecurity:        false,
+		IgnoreCertificate:      true,
+		DisableDevShmUsage:     true,
+		NoSandbox:              true,
+		DisableExtensions:      true,
+		DisableBackgrounding:   true,
+		ProxyServer:            "",
+		ProxyBypassList:        "",
+		ExtraFlags: []string{
+			"--disable-blink-features=AutomationControlled",
+			"--disable-gpu",
+			"--no-sandbox",
+			"--disable-dev-shm-usage",
+		},
+	}
 }
 
 // ExtractionFunc defines a function that takes a *goquery.Selection and returns a string
@@ -225,6 +265,11 @@ func startBrowserWithOptions(opts *BrowserOptions) error {
 				browserProcess.Process.Kill()
 				browserProcess = nil
 			}
+			// Also stop Xvfb if running
+			if xvfbProcess != nil {
+				xvfbProcess.Process.Kill()
+				xvfbProcess = nil
+			}
 		} else {
 			log.Println("Chromium browser is already running on port", port)
 			return nil
@@ -236,6 +281,26 @@ func startBrowserWithOptions(opts *BrowserOptions) error {
 		browserProcess.Process.Kill()
 		browserProcess = nil
 	}
+	if xvfbProcess != nil {
+		xvfbProcess.Process.Kill()
+		xvfbProcess = nil
+	}
+
+	// Start Xvfb if needed (for non-headless mode in Docker)
+	var display string
+	if !opts.Headless && opts.UseXvfb {
+		log.Println("Starting Xvfb virtual display...")
+		xvfbCmd := exec.Command("Xvfb", xvfbDisplay, "-screen", "0", "1920x1080x24", "-ac", "-nolisten", "tcp", "-dpi", "96")
+		if err := xvfbCmd.Start(); err != nil {
+			return fmt.Errorf("failed to start Xvfb: %w (make sure xvfb is installed: apt-get install xvfb)", err)
+		}
+		xvfbProcess = xvfbCmd
+		display = xvfbDisplay
+		log.Printf("Xvfb started on display %s", display)
+		
+		// Give Xvfb a moment to start
+		time.Sleep(500 * time.Millisecond)
+	}
 
 	// Build command line arguments
 	args := []string{}
@@ -243,6 +308,9 @@ func startBrowserWithOptions(opts *BrowserOptions) error {
 	// Headless mode
 	if opts.Headless {
 		args = append(args, "--headless=new")
+	} else if display != "" {
+		// Use Xvfb display for non-headless mode
+		args = append(args, "--display="+display)
 	}
 
 	// Remote debugging
@@ -329,12 +397,28 @@ func startBrowserWithOptions(opts *BrowserOptions) error {
 		browserPath = "chromium"
 	}
 
-	// Create and start a new browser process
-	browserProcess = exec.Command(browserPath, args...)
+	// Create browser command
+	browserCmd := exec.Command(browserPath, args...)
+	
+	// Set display environment variable if using Xvfb
+	if display != "" {
+		browserCmd.Env = append(os.Environ(), "DISPLAY="+display)
+	}
+	
+	// Set timezone environment variable if specified
+	if opts.Timezone != "" {
+		browserCmd.Env = append(browserCmd.Env, "TZ="+opts.Timezone)
+	}
+
+	browserProcess = browserCmd
+
+	// Capture stderr for better error messages
+	browserProcess.Stderr = os.Stderr
+	browserProcess.Stdout = os.Stdout
 
 	err := browserProcess.Start()
 	if err != nil {
-		return fmt.Errorf("failed to start Chromium: %w", err)
+		return fmt.Errorf("failed to start Chromium: %w (path: %s, args: %v)", err, browserPath, args)
 	}
 
 	// Store current options
@@ -344,6 +428,10 @@ func startBrowserWithOptions(opts *BrowserOptions) error {
 	if err := waitForBrowser(port); err != nil {
 		browserProcess.Process.Kill()
 		browserProcess = nil
+		if xvfbProcess != nil {
+			xvfbProcess.Process.Kill()
+			xvfbProcess = nil
+		}
 		return fmt.Errorf("failed to wait for browser: %w", err)
 	}
 
@@ -365,7 +453,8 @@ func browserOptionsMatch(a, b *BrowserOptions) bool {
 		a.EnableWebGL == b.EnableWebGL &&
 		a.HideWebDriver == b.HideWebDriver &&
 		a.DisableAutomationFlags == b.DisableAutomationFlags &&
-		a.ProxyServer == b.ProxyServer
+		a.ProxyServer == b.ProxyServer &&
+		a.UseXvfb == b.UseXvfb
 }
 
 func stopBrowser() {
@@ -377,6 +466,14 @@ func stopBrowser() {
 		browserProcess.Process.Kill()
 		browserProcess = nil
 		log.Println("Chromium browser stopped")
+	}
+	
+	// Also stop Xvfb if running
+	if xvfbProcess != nil {
+		log.Println("Stopping Xvfb...")
+		xvfbProcess.Process.Kill()
+		xvfbProcess = nil
+		log.Println("Xvfb stopped")
 	}
 }
 

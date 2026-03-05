@@ -32,4 +32,5 @@ var (
 	DefaultBrowserOptions  = pkg.DefaultBrowserOptions
 	StealthBrowserOptions  = pkg.StealthBrowserOptions
 	DefaultAntiDetectionOptions = pkg.DefaultAntiDetectionOptions
+	DockerBrowserOptions   = pkg.DockerBrowserOptions
 )
