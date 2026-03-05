@@ -22,10 +22,115 @@ import (
 
 // Global variables to manage Chromium browser process
 var (
-	browserProcess *exec.Cmd
-	browserMutex   sync.Mutex
-	browserPort    = "9222"
+	browserProcess    *exec.Cmd
+	browserMutex      sync.Mutex
+	browserPort       = "9222"
+	currentBrowserOps *BrowserOptions // Track current browser options
 )
+
+// BrowserOptions holds configuration for the Chromium browser
+type BrowserOptions struct {
+	// Basic browser settings
+	Headless       bool   // Run in headless mode (default: true)
+	BrowserPath    string // Path to Chromium/Chrome binary (default: "chromium")
+	DebuggingPort  string // Remote debugging port (default: "9222")
+	UserDataDir    string // User data directory for profile persistence
+
+	// Window and display settings
+	WindowSize     string // Window size in format "width,height" (default: "1920,1080")
+	Language       string // Browser language (default: "en-US,en;q=0.9")
+	Timezone       string // Timezone to emulate (default: "America/New_York")
+
+	// Anti-detection settings
+	UserAgent      string // Custom User-Agent string
+	DisableGPU     bool   // Disable GPU acceleration (default: true for headless)
+	EnableWebGL    bool   // Enable WebGL (can be used for fingerprinting)
+	HideWebDriver  bool   // Hide webdriver property (default: true)
+	DisableAutomationFlags bool // Disable automation flags (default: true)
+
+	// Security and privacy settings
+	DisableSecurity     bool // Disable web security (default: false for production)
+	IgnoreCertificate   bool // Ignore certificate errors (default: true for scraping)
+	DisableDevShmUsage  bool // Disable /dev/shm usage (default: true for Docker)
+	NoSandbox           bool // Disable sandbox (default: true for Docker/root)
+	DisableExtensions   bool // Disable extensions (default: true)
+	DisableBackgrounding bool // Disable background timer throttling
+
+	// Network settings
+	ProxyServer      string // Proxy server URL (e.g., "http://proxy:port")
+	ProxyBypassList  string // Comma-separated list of hosts to bypass proxy
+
+	// Additional custom flags
+	ExtraFlags     []string // Additional Chromium flags
+}
+
+// DefaultBrowserOptions returns a BrowserOptions with secure defaults
+func DefaultBrowserOptions() *BrowserOptions {
+	return &BrowserOptions{
+		Headless:               true,
+		BrowserPath:            "chromium",
+		DebuggingPort:          "9222",
+		UserDataDir:            "/tmp/chrome-profile",
+		WindowSize:             "1920,1080",
+		Language:               "en-US,en;q=0.9",
+		Timezone:               "America/New_York",
+		UserAgent:              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+		DisableGPU:             true,
+		EnableWebGL:            false,
+		HideWebDriver:          true,
+		DisableAutomationFlags: true,
+		DisableSecurity:        false,
+		IgnoreCertificate:      true,
+		DisableDevShmUsage:     true,
+		NoSandbox:              true,
+		DisableExtensions:      true,
+		DisableBackgrounding:   true,
+		ProxyServer:            "",
+		ProxyBypassList:        "",
+		ExtraFlags:             []string{},
+	}
+}
+
+// StealthBrowserOptions returns a BrowserOptions optimized for anti-detection
+func StealthBrowserOptions() *BrowserOptions {
+	return &BrowserOptions{
+		Headless:               true,
+		BrowserPath:            "chromium",
+		DebuggingPort:          "9222",
+		UserDataDir:            "/tmp/chrome-profile-stealth",
+		WindowSize:             "1920,1080",
+		Language:               "en-US,en;q=0.9",
+		Timezone:               "America/New_York",
+		// Realistic Chrome User-Agent
+		UserAgent:              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+		DisableGPU:             false, // GPU enabled for realistic fingerprint
+		EnableWebGL:            true,  // WebGL enabled
+		HideWebDriver:          true,
+		DisableAutomationFlags: true,
+		DisableSecurity:        false,
+		IgnoreCertificate:      true,
+		DisableDevShmUsage:     true,
+		NoSandbox:              true,
+		DisableExtensions:      true,
+		DisableBackgrounding:   true,
+		ProxyServer:            "",
+		ProxyBypassList:        "",
+		ExtraFlags: []string{
+			"--disable-blink-features=AutomationControlled",
+		},
+	}
+}
+
+// DefaultAntiDetectionOptions returns options balancing detection avoidance and stability
+func DefaultAntiDetectionOptions() *BrowserOptions {
+	opts := DefaultBrowserOptions()
+	opts.HideWebDriver = true
+	opts.DisableAutomationFlags = true
+	opts.ExtraFlags = []string{
+		"--disable-blink-features=AutomationControlled",
+	}
+	return opts
+}
 
 // ExtractionFunc defines a function that takes a *goquery.Selection and returns a string
 type ExtractionFunc func(*goquery.Selection) string
@@ -60,6 +165,7 @@ type Scrapper[T any] struct {
 	visitedURLs                 map[string]bool   // Track URLs that have been visited to prevent duplicates
 	visitedMutex                sync.RWMutex      // Mutex to protect visitedURLs map
 	KeepBrowserOpen             bool              // Whether to keep the browser open after scraping (default: false)
+	BrowserOptions              *BrowserOptions   // Custom browser configuration options
 }
 
 // Options for configuring the scraper
@@ -89,14 +195,40 @@ func waitForBrowser(port string) error {
 }
 
 // startBrowserIfNotRunning starts the Chromium browser if it's not already running
+// Uses default browser options
 func startBrowserIfNotRunning() error {
+	return startBrowserWithOptions(DefaultBrowserOptions())
+}
+
+// startBrowserWithOptions starts the Chromium browser with custom options
+func startBrowserWithOptions(opts *BrowserOptions) error {
+	if opts == nil {
+		opts = DefaultBrowserOptions()
+	}
+
 	browserMutex.Lock()
 	defer browserMutex.Unlock()
 
-	// Check if the browser is already running
-	if isBrowserRunning(browserPort) {
-		log.Println("Chromium browser is already running on port", browserPort)
-		return nil
+	// Use the port from options or default
+	port := opts.DebuggingPort
+	if port == "" {
+		port = browserPort
+	}
+	browserPort = port
+
+	// Check if the browser is already running with the same options
+	if isBrowserRunning(port) {
+		// If browser is running but options changed, we need to restart
+		if currentBrowserOps != nil && !browserOptionsMatch(currentBrowserOps, opts) {
+			log.Println("Browser options changed, restarting browser...")
+			if browserProcess != nil {
+				browserProcess.Process.Kill()
+				browserProcess = nil
+			}
+		} else {
+			log.Println("Chromium browser is already running on port", port)
+			return nil
+		}
 	}
 
 	// If there's an old process, clean it up
@@ -105,40 +237,135 @@ func startBrowserIfNotRunning() error {
 		browserProcess = nil
 	}
 
+	// Build command line arguments
+	args := []string{}
+
+	// Headless mode
+	if opts.Headless {
+		args = append(args, "--headless=new")
+	}
+
+	// Remote debugging
+	args = append(args, "--remote-debugging-port="+port)
+	args = append(args, "--remote-debugging-address=127.0.0.1")
+
+	// User data directory
+	if opts.UserDataDir != "" {
+		args = append(args, "--user-data-dir="+opts.UserDataDir)
+	}
+
+	// Window size
+	if opts.WindowSize != "" {
+		args = append(args, "--window-size="+opts.WindowSize)
+	}
+
+	// User agent
+	if opts.UserAgent != "" {
+		args = append(args, "--user-agent="+opts.UserAgent)
+	}
+
+	// GPU settings
+	if opts.DisableGPU {
+		args = append(args, "--disable-gpu")
+	}
+	if opts.EnableWebGL {
+		args = append(args, "--enable-webgl")
+	}
+
+	// Security settings
+	if opts.NoSandbox {
+		args = append(args, "--no-sandbox")
+	}
+	if opts.DisableDevShmUsage {
+		args = append(args, "--disable-dev-shm-usage")
+	}
+	if opts.DisableSecurity {
+		args = append(args, "--disable-web-security")
+		args = append(args, "--allow-running-insecure-content")
+	}
+	if opts.IgnoreCertificate {
+		args = append(args, "--ignore-certificate-errors")
+		args = append(args, "--ignore-urlfetcher-cert-requests")
+	}
+	if opts.DisableExtensions {
+		args = append(args, "--disable-extensions")
+	}
+
+	// Anti-detection settings
+	if opts.HideWebDriver {
+		args = append(args, "--disable-blink-features=AutomationControlled")
+	}
+	if opts.DisableAutomationFlags {
+		args = append(args, "--disable-features=IsolateOrigins,site-per-process")
+		args = append(args, "--disable-features=VizDisplayCompositor")
+	}
+	if opts.DisableBackgrounding {
+		args = append(args, "--disable-background-timer-throttling")
+		args = append(args, "--disable-backgrounding-occluded-windows")
+	}
+
+	// Network settings
+	if opts.ProxyServer != "" {
+		args = append(args, "--proxy-server="+opts.ProxyServer)
+	}
+	if opts.ProxyBypassList != "" {
+		args = append(args, "--proxy-bypass-list="+opts.ProxyBypassList)
+	}
+
+	// Language and timezone
+	if opts.Language != "" {
+		args = append(args, "--lang="+opts.Language)
+	}
+	if opts.Timezone != "" {
+		args = append(args, "--timezone="+opts.Timezone)
+	}
+
+	// Add extra flags
+	args = append(args, opts.ExtraFlags...)
+
+	// Determine browser path
+	browserPath := opts.BrowserPath
+	if browserPath == "" {
+		browserPath = "chromium"
+	}
+
 	// Create and start a new browser process
-	browserProcess = exec.Command("chromium",
-		"--headless=new",
-		"--remote-debugging-port="+browserPort,
-		"--remote-debugging-address=127.0.0.1",
-		"--disable-blink-features=AutomationControlled",
-		"--disable-gpu",
-		"--no-sandbox",
-		"--disable-dev-shm-usage",
-		"--user-data-dir=/tmp/chrome-profile",
-		"--disable-features=IsolateOrigins,site-per-process",
-		"--window-size=1920,1080",
-		"--allow-running-insecure-content",
-		"--ignore-certificate-errors",
-		"--ignore-urlfetcher-cert-requests",
-		"--disable-web-security",
-		"--disable-features=VizDisplayCompositor",
-		`--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36`,
-	)
+	browserProcess = exec.Command(browserPath, args...)
 
 	err := browserProcess.Start()
 	if err != nil {
 		return fmt.Errorf("failed to start Chromium: %w", err)
 	}
 
+	// Store current options
+	currentBrowserOps = opts
+
 	log.Println("Starting Chromium browser...")
-	if err := waitForBrowser(browserPort); err != nil {
+	if err := waitForBrowser(port); err != nil {
 		browserProcess.Process.Kill()
 		browserProcess = nil
 		return fmt.Errorf("failed to wait for browser: %w", err)
 	}
 
-	log.Println("Chromium browser started successfully on port", browserPort)
+	log.Println("Chromium browser started successfully on port", port)
 	return nil
+}
+
+// browserOptionsMatch compares two BrowserOptions structs
+func browserOptionsMatch(a, b *BrowserOptions) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Headless == b.Headless &&
+		a.DebuggingPort == b.DebuggingPort &&
+		a.UserDataDir == b.UserDataDir &&
+		a.WindowSize == b.WindowSize &&
+		a.UserAgent == b.UserAgent &&
+		a.DisableGPU == b.DisableGPU &&
+		a.EnableWebGL == b.EnableWebGL &&
+		a.HideWebDriver == b.HideWebDriver &&
+		a.DisableAutomationFlags == b.DisableAutomationFlags &&
+		a.ProxyServer == b.ProxyServer
 }
 
 func stopBrowser() {
@@ -460,8 +687,45 @@ func (s *Scrapper[T]) parseWithSelectors(doc *goquery.Document, g *geziyor.Geziy
 					return nil
 				}),
 
+				// Inject stealth scripts before navigation
+				chromedp.ActionFunc(func(ctx context.Context) error {
+					stealthScripts := []string{
+						`Object.defineProperty(navigator, 'webdriver', {get: () => undefined})`,
+						`Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]})`,
+						`Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']})`,
+						`Object.defineProperty(navigator, 'connection', {get: () => ({effectiveType: '4g',rtt: 50,downlink: 10,saveData: false})})`,
+						`Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8})`,
+						`Object.defineProperty(navigator, 'deviceMemory', {get: () => 8})`,
+						`Object.defineProperty(navigator, 'chrome', {get: () => ({loadTimes: function(){}, csi: function(){}})})`,
+						`delete navigator.__proto__.webdriver`,
+					}
+
+					for _, script := range stealthScripts {
+						if err := chromedp.Evaluate(script, nil).Do(ctx); err != nil {
+							log.Printf("Warning: stealth script failed for link: %v", err)
+						}
+					}
+					return nil
+				}),
+
 				chromedp.Navigate(link),
 				chromedp.WaitReady(":root"),
+
+				// Post-navigation stealth scripts
+				chromedp.ActionFunc(func(ctx context.Context) error {
+					postNavigateScripts := []string{
+						`Object.defineProperty(navigator, 'webdriver', {get: () => undefined})`,
+						`delete navigator.__proto__.webdriver`,
+					}
+
+					for _, script := range postNavigateScripts {
+						if err := chromedp.Evaluate(script, nil).Do(ctx); err != nil {
+							log.Printf("Warning: post-navigate script failed for link: %v", err)
+						}
+					}
+					return nil
+				}),
+
 				chromedp.ActionFunc(func(ctx context.Context) error {
 					node, err := dom.GetDocument().Do(ctx)
 					if err != nil {
@@ -480,9 +744,8 @@ func (s *Scrapper[T]) parseWithSelectors(doc *goquery.Document, g *geziyor.Geziy
 					if s.ParseFunc != nil {
 						result = s.ParseFunc(doc)
 					} else {
-						result = s.parseWithSelectors(doc, g, baseUrl, link) // Pass the link as currentURL
+						result = s.parseWithSelectors(doc, g, baseUrl, link)
 					}
-					// check if the result is empty
 					if reflect.ValueOf(result).IsZero() {
 						fmt.Println("result is empty")
 						return nil
@@ -503,7 +766,13 @@ func (s *Scrapper[T]) parseWithSelectors(doc *goquery.Document, g *geziyor.Geziy
 
 // ScrapeStream starts scraping and returns a channel that will receive results as they are scraped
 func (s *Scrapper[T]) ScrapeStream() (<-chan T, error) {
-	err := startBrowserIfNotRunning()
+	// Use custom browser options if provided, otherwise use defaults
+	var err error
+	if s.BrowserOptions != nil {
+		err = startBrowserWithOptions(s.BrowserOptions)
+	} else {
+		err = startBrowserIfNotRunning()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to start browser: %w", err)
 	}
@@ -550,9 +819,6 @@ func (s *Scrapper[T]) ScrapeStream() (<-chan T, error) {
 
 				req.Actions = []chromedp.Action{
 					chromedp.Navigate("about:blank"),
-					// chromedp.ActionFunc(func(ctx context.Context) error {
-					// 	return nil
-					// }),
 
 					// 1️⃣ Set cookies BEFORE navigation
 					chromedp.ActionFunc(func(ctx context.Context) error {
@@ -581,13 +847,62 @@ func (s *Scrapper[T]) ScrapeStream() (<-chan T, error) {
 						return nil
 					}),
 
-					// 2️⃣ Navigate to the URL
+					// 2️⃣ Inject stealth scripts before navigation
+					chromedp.ActionFunc(func(ctx context.Context) error {
+						// JavaScript to hide automation and spoof browser properties
+						stealthScripts := []string{
+							// Hide webdriver property
+							`Object.defineProperty(navigator, 'webdriver', {get: () => undefined})`,
+							// Override plugins to look more realistic
+							`Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]})`,
+							// Override languages
+							`Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']})`,
+							// Override connection
+							`Object.defineProperty(navigator, 'connection', {get: () => ({effectiveType: '4g',rtt: 50,downlink: 10,saveData: false})})`,
+							// Override hardware concurrency
+							`Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8})`,
+							// Override device memory
+							`Object.defineProperty(navigator, 'deviceMemory', {get: () => 8})`,
+							// Override permissions
+							`const originalQuery = window.navigator.permissions.query;window.navigator.permissions.query = (parameters) => (parameters.name === 'notifications' ? Promise.resolve({state: Notification.permission}) : originalQuery(parameters))`,
+							// Override chrome property
+							`Object.defineProperty(navigator, 'chrome', {get: () => ({loadTimes: function(){}, csi: function(){}})})`,
+							// Remove automation-related properties
+							`delete navigator.__proto__.webdriver`,
+						}
+
+						for _, script := range stealthScripts {
+							if err := chromedp.Evaluate(script, nil).Do(ctx); err != nil {
+								// Continue even if some scripts fail
+								log.Printf("Warning: stealth script failed: %v", err)
+							}
+						}
+						return nil
+					}),
+
+					// 3️⃣ Navigate to the URL
 					chromedp.Navigate(u),
 
-					// 3️⃣ Wait until the page root is ready
+					// 4️⃣ Wait until the page root is ready
 					chromedp.WaitReady(":root"),
 
-					// 4️⃣ Execute pre-scraping actions
+					// 5️⃣ Additional post-navigation stealth scripts
+					chromedp.ActionFunc(func(ctx context.Context) error {
+						// Scripts that need to be re-injected after navigation
+						postNavigateScripts := []string{
+							`Object.defineProperty(navigator, 'webdriver', {get: () => undefined})`,
+							`delete navigator.__proto__.webdriver`,
+						}
+
+						for _, script := range postNavigateScripts {
+							if err := chromedp.Evaluate(script, nil).Do(ctx); err != nil {
+								log.Printf("Warning: post-navigate script failed: %v", err)
+							}
+						}
+						return nil
+					}),
+
+					// 6️⃣ Execute pre-scraping actions
 					chromedp.ActionFunc(func(ctx context.Context) error {
 						for _, action := range s.PreScrapeActions {
 							switch action.Type {
