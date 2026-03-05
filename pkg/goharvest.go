@@ -35,16 +35,16 @@ var (
 // BrowserOptions holds configuration for the Chromium browser
 type BrowserOptions struct {
 	// Basic browser settings
-	Headless       bool   // Run in headless mode (default: true)
-	BrowserPath    string // Path to Chromium/Chrome binary (default: "chromium")
-	DebuggingPort  string // Remote debugging port (default: "9222")
-	UserDataDir    string // User data directory for profile persistence
+	Headless      bool   // Run in headless mode (default: true)
+	BrowserPath   string // Path to Chromium/Chrome binary (default: "chromium")
+	DebuggingPort string // Remote debugging port (default: "9222")
+	UserDataDir   string // User data directory for profile persistence
 
 	// Window and display settings
-	WindowSize     string // Window size in format "width,height" (default: "1920,1080")
-	Language       string // Browser language (default: "en-US,en;q=0.9")
-	Timezone       string // Timezone to emulate (default: "America/New_York")
-	UseXvfb        bool   // Use Xvfb virtual framebuffer for non-headless mode in Docker (default: false)
+	WindowSize string // Window size in format "width,height" (default: "1920,1080")
+	Language   string // Browser language (default: "en-US,en;q=0.9")
+	Timezone   string // Timezone to emulate (default: "America/New_York")
+	UseXvfb    bool   // Use Xvfb virtual framebuffer for non-headless mode in Docker (default: false)
 
 	// Anti-detection settings
 	UserAgent              string // Custom User-Agent string
@@ -54,11 +54,11 @@ type BrowserOptions struct {
 	DisableAutomationFlags bool   // Disable automation flags (default: true)
 
 	// Security and privacy settings
-	DisableSecurity     bool // Disable web security (default: false for production)
-	IgnoreCertificate   bool // Ignore certificate errors (default: true for scraping)
-	DisableDevShmUsage  bool // Disable /dev/shm usage (default: true for Docker)
-	NoSandbox           bool // Disable sandbox (default: true for Docker/root)
-	DisableExtensions   bool // Disable extensions (default: true)
+	DisableSecurity      bool // Disable web security (default: false for production)
+	IgnoreCertificate    bool // Ignore certificate errors (default: true for scraping)
+	DisableDevShmUsage   bool // Disable /dev/shm usage (default: true for Docker)
+	NoSandbox            bool // Disable sandbox (default: true for Docker/root)
+	DisableExtensions    bool // Disable extensions (default: true)
 	DisableBackgrounding bool // Disable background timer throttling
 
 	// Network settings
@@ -109,8 +109,8 @@ func StealthBrowserOptions() *BrowserOptions {
 		Timezone:               "America/New_York",
 		UseXvfb:                false,
 		UserAgent:              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-		DisableGPU:             false,
-		EnableWebGL:            true,
+		DisableGPU:             false, // Keep GPU on to look more like a real browser
+		EnableWebGL:            true,  // Enable WebGL to pass fingerprint checks
 		HideWebDriver:          true,
 		DisableAutomationFlags: true,
 		DisableSecurity:        false,
@@ -213,16 +213,17 @@ type Options struct {
 	MaxScroll   int
 }
 
-// stealthJS contains JavaScript to evade common bot detection mechanisms
+// stealthJS is injected into every page immediately after navigation to defeat
+// common headless-browser fingerprinting techniques.
 const stealthJS = `
 (function() {
-	// Override webdriver property - most basic check
+	// 1. Remove the webdriver flag that headless Chrome exposes
 	Object.defineProperty(navigator, 'webdriver', {
 		get: () => undefined,
 		configurable: true,
 	});
 
-	// Override plugins to appear as a real browser (empty plugins = headless)
+	// 2. Override plugins — real browsers have plugins, headless has none
 	Object.defineProperty(navigator, 'plugins', {
 		get: () => {
 			const arr = [1, 2, 3, 4, 5];
@@ -232,7 +233,7 @@ const stealthJS = `
 		configurable: true,
 	});
 
-	// Override mimeTypes
+	// 3. Override mimeTypes — same reason as plugins
 	Object.defineProperty(navigator, 'mimeTypes', {
 		get: () => {
 			const arr = [1, 2, 3];
@@ -242,72 +243,32 @@ const stealthJS = `
 		configurable: true,
 	});
 
-	// Override languages to look like a real user
+	// 4. Set languages to look like a real en-US user
 	Object.defineProperty(navigator, 'languages', {
 		get: () => ['en-US', 'en'],
 		configurable: true,
 	});
 
-	// Add chrome property that real Chrome has
+	// 5. Add the window.chrome object that real Chrome always exposes
 	if (!window.chrome) {
 		window.chrome = {
 			app: {
 				isInstalled: false,
-				InstallState: {
-					DISABLED: 'disabled',
-					INSTALLED: 'installed',
-					NOT_INSTALLED: 'not_installed'
-				},
-				RunningState: {
-					CANNOT_RUN: 'cannot_run',
-					READY_TO_RUN: 'ready_to_run',
-					RUNNING: 'running'
-				}
+				InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
+				RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' }
 			},
 			runtime: {
-				OnInstalledReason: {
-					CHROME_UPDATE: 'chrome_update',
-					INSTALL: 'install',
-					SHARED_MODULE_UPDATE: 'shared_module_update',
-					UPDATE: 'update'
-				},
-				OnRestartRequiredReason: {
-					APP_UPDATE: 'app_update',
-					OS_UPDATE: 'os_update',
-					PERIODIC: 'periodic'
-				},
-				PlatformArch: {
-					ARM: 'arm',
-					ARM64: 'arm64',
-					MIPS: 'mips',
-					MIPS64: 'mips64',
-					X86_32: 'x86-32',
-					X86_64: 'x86-64'
-				},
-				PlatformNacl: {
-					ARM: 'arm',
-					PNACL: 'pnacl',
-					X86_32: 'x86-32',
-					X86_64: 'x86-64'
-				},
-				PlatformOs: {
-					ANDROID: 'android',
-					CROS: 'cros',
-					LINUX: 'linux',
-					MAC: 'mac',
-					OPENBSD: 'openbsd',
-					WIN: 'win'
-				},
-				RequestUpdateCheckStatus: {
-					NO_UPDATE: 'no_update',
-					THROTTLED: 'throttled',
-					UPDATE_AVAILABLE: 'update_available'
-				}
+				OnInstalledReason: { CHROME_UPDATE: 'chrome_update', INSTALL: 'install', SHARED_MODULE_UPDATE: 'shared_module_update', UPDATE: 'update' },
+				OnRestartRequiredReason: { APP_UPDATE: 'app_update', OS_UPDATE: 'os_update', PERIODIC: 'periodic' },
+				PlatformArch: { ARM: 'arm', ARM64: 'arm64', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64' },
+				PlatformNacl: { ARM: 'arm', PNACL: 'pnacl', X86_32: 'x86-32', X86_64: 'x86-64' },
+				PlatformOs: { ANDROID: 'android', CROS: 'cros', LINUX: 'linux', MAC: 'mac', OPENBSD: 'openbsd', WIN: 'win' },
+				RequestUpdateCheckStatus: { NO_UPDATE: 'no_update', THROTTLED: 'throttled', UPDATE_AVAILABLE: 'update_available' }
 			}
 		};
 	}
 
-	// Override permissions query to prevent notification-based detection
+	// 6. Patch permissions API — bots are often caught here
 	const originalQuery = window.navigator.permissions.query;
 	window.navigator.permissions.query = (parameters) => (
 		parameters.name === 'notifications' ?
@@ -315,7 +276,7 @@ const stealthJS = `
 		originalQuery(parameters)
 	);
 
-	// Fix hairline feature detection
+	// 7. Fix zero-size window properties that headless exposes
 	if (window.outerWidth === 0) {
 		Object.defineProperty(window, 'outerWidth', { get: () => window.innerWidth });
 	}
@@ -323,7 +284,7 @@ const stealthJS = `
 		Object.defineProperty(window, 'outerHeight', { get: () => window.innerHeight });
 	}
 
-	// Override connection rtt to not look like a bot
+	// 8. Override connection RTT to look like a real network connection
 	if (navigator.connection) {
 		Object.defineProperty(navigator.connection, 'rtt', {
 			get: () => 100,
@@ -333,7 +294,8 @@ const stealthJS = `
 })();
 `
 
-// stealthHeaders returns the HTTP headers that mimic a real browser
+// stealthHeaders mimics the HTTP headers sent by a real Chrome browser.
+// Headless Chrome omits several of these by default, triggering bot detection.
 var stealthHeaders = network.Headers{
 	"Accept":                    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
 	"Accept-Language":           "en-US,en;q=0.9",
@@ -349,23 +311,28 @@ var stealthHeaders = network.Headers{
 	"Upgrade-Insecure-Requests": "1",
 }
 
-// buildStealthActions returns the chromedp actions to inject stealth scripts and headers
+// buildStealthActions returns the ordered chromedp actions that configure stealth
+// mode before page content is scraped. Called for every new page request.
+//
+// Order: blank page → set headers → enable network → set cookies →
+//
+//	navigate → inject JS → wait ready → human delay
 func buildStealthActions(targetURL string, cookies []map[string]string) []chromedp.Action {
 	return []chromedp.Action{
-		// 1. Navigate to blank page first to allow CDP calls
+		// Step 1: Start from blank so CDP calls work before navigation
 		chromedp.Navigate("about:blank"),
 
-		// 2. Set extra HTTP headers to mimic real browser
+		// Step 2: Set realistic HTTP headers (Sec-Fetch-*, Accept, etc.)
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			return network.SetExtraHTTPHeaders(stealthHeaders).Do(ctx)
 		}),
 
-		// 3. Enable network domain
+		// Step 3: Enable network domain so cookies and headers take effect
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			return network.Enable().Do(ctx)
 		}),
 
-		// 4. Set cookies BEFORE navigation
+		// Step 4: Set cookies BEFORE navigation so the server sees them on first request
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			parsedURL, err := url.Parse(targetURL)
 			if err != nil {
@@ -376,7 +343,6 @@ func buildStealthActions(targetURL string, cookies []map[string]string) []chrome
 			if !strings.HasPrefix(domain, ".") {
 				domain = "." + domain
 			}
-
 			for _, cookie := range cookies {
 				err := network.SetCookie(cookie["name"], cookie["value"]).
 					WithDomain(domain).
@@ -386,23 +352,24 @@ func buildStealthActions(targetURL string, cookies []map[string]string) []chrome
 					Do(ctx)
 				if err != nil {
 					log.Println("Failed to set cookie:", cookie["name"], err)
+					// Non-fatal — continue with remaining cookies
 				}
 			}
 			return nil
 		}),
 
-		// 5. Navigate to the actual target URL
+		// Step 5: Navigate to the actual target URL
 		chromedp.Navigate(targetURL),
 
-		// 6. Inject stealth JS right after navigation begins
+		// Step 6: Inject stealth JS before the page's own scripts can run fingerprint checks
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			return chromedp.Evaluate(stealthJS, nil).Do(ctx)
 		}),
 
-		// 7. Wait for the page root to be ready
+		// Step 7: Wait for the DOM to be fully ready
 		chromedp.WaitReady(":root"),
 
-		// 8. Small human-like delay to let JS finish rendering
+		// Step 8: Brief human-like pause to let dynamic content render
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			time.Sleep(2 * time.Second)
 			return nil
@@ -410,7 +377,7 @@ func buildStealthActions(targetURL string, cookies []map[string]string) []chrome
 	}
 }
 
-// waitForBrowser waits for the browser to start and be ready to accept connections
+// waitForBrowser polls until the browser's remote debugging endpoint responds
 func waitForBrowser(port string) error {
 	timeout := time.After(30 * time.Second)
 	ticker := time.NewTicker(500 * time.Millisecond)
@@ -430,12 +397,13 @@ func waitForBrowser(port string) error {
 	}
 }
 
-// startBrowserIfNotRunning starts the Chromium browser if it's not already running
+// startBrowserIfNotRunning starts Chromium with default options
 func startBrowserIfNotRunning() error {
 	return startBrowserWithOptions(DefaultBrowserOptions())
 }
 
-// startBrowserWithOptions starts the Chromium browser with custom options
+// startBrowserWithOptions starts Chromium with the given options.
+// Reuses an existing process if options match; restarts if they differ.
 func startBrowserWithOptions(opts *BrowserOptions) error {
 	if opts == nil {
 		opts = DefaultBrowserOptions()
@@ -444,14 +412,12 @@ func startBrowserWithOptions(opts *BrowserOptions) error {
 	browserMutex.Lock()
 	defer browserMutex.Unlock()
 
-	// Use the port from options or default
 	port := opts.DebuggingPort
 	if port == "" {
 		port = browserPort
 	}
 	browserPort = port
 
-	// Check if the browser is already running with the same options
 	if isBrowserRunning(port) {
 		if currentBrowserOps != nil && !browserOptionsMatch(currentBrowserOps, opts) {
 			log.Println("Browser options changed, restarting browser...")
@@ -469,7 +435,7 @@ func startBrowserWithOptions(opts *BrowserOptions) error {
 		}
 	}
 
-	// Clean up old processes
+	// Clean up stale processes
 	if browserProcess != nil {
 		browserProcess.Process.Kill()
 		browserProcess = nil
@@ -479,13 +445,13 @@ func startBrowserWithOptions(opts *BrowserOptions) error {
 		xvfbProcess = nil
 	}
 
-	// Start Xvfb if needed (for non-headless mode in Docker)
+	// Start Xvfb for non-headless mode inside Docker
 	var display string
 	if !opts.Headless && opts.UseXvfb {
 		log.Println("Starting Xvfb virtual display...")
 		xvfbCmd := exec.Command("Xvfb", xvfbDisplay, "-screen", "0", "1920x1080x24", "-ac", "-nolisten", "tcp", "-dpi", "96")
 		if err := xvfbCmd.Start(); err != nil {
-			return fmt.Errorf("failed to start Xvfb: %w (make sure xvfb is installed: apt-get install xvfb)", err)
+			return fmt.Errorf("failed to start Xvfb: %w (install with: apt-get install xvfb)", err)
 		}
 		xvfbProcess = xvfbCmd
 		display = xvfbDisplay
@@ -493,44 +459,35 @@ func startBrowserWithOptions(opts *BrowserOptions) error {
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	// Build command line arguments
+	// Build Chromium launch arguments
 	args := []string{}
 
-	// Headless mode
+	// Use --headless=old: significantly less detectable than --headless=new
 	if opts.Headless {
-		args = append(args, "--headless=old") // Use old headless - less detectable
+		args = append(args, "--headless=old")
 	} else if display != "" {
 		args = append(args, "--display="+display)
 	}
 
-	// Remote debugging
 	args = append(args, "--remote-debugging-port="+port)
 	args = append(args, "--remote-debugging-address=127.0.0.1")
 
-	// User data directory
 	if opts.UserDataDir != "" {
 		args = append(args, "--user-data-dir="+opts.UserDataDir)
 	}
-
-	// Window size
 	if opts.WindowSize != "" {
 		args = append(args, "--window-size="+opts.WindowSize)
+		args = append(args, "--start-maximized")
 	}
-
-	// User agent
 	if opts.UserAgent != "" {
 		args = append(args, "--user-agent="+opts.UserAgent)
 	}
-
-	// GPU settings
 	if opts.DisableGPU {
 		args = append(args, "--disable-gpu")
 	}
 	if opts.EnableWebGL {
 		args = append(args, "--enable-webgl")
 	}
-
-	// Security settings
 	if opts.NoSandbox {
 		args = append(args, "--no-sandbox")
 	}
@@ -548,8 +505,6 @@ func startBrowserWithOptions(opts *BrowserOptions) error {
 	if opts.DisableExtensions {
 		args = append(args, "--disable-extensions")
 	}
-
-	// Anti-detection settings
 	if opts.HideWebDriver {
 		args = append(args, "--disable-blink-features=AutomationControlled")
 	}
@@ -565,53 +520,44 @@ func startBrowserWithOptions(opts *BrowserOptions) error {
 		args = append(args, "--disable-renderer-backgrounding")
 		args = append(args, "--disable-background-timer-throttling")
 	}
-
-	// Network settings
 	if opts.ProxyServer != "" {
 		args = append(args, "--proxy-server="+opts.ProxyServer)
 	}
 	if opts.ProxyBypassList != "" {
 		args = append(args, "--proxy-bypass-list="+opts.ProxyBypassList)
 	}
-
-	// Language
 	if opts.Language != "" {
 		args = append(args, "--lang="+opts.Language)
 	}
 
-	// Add extra flags
 	args = append(args, opts.ExtraFlags...)
 
-	// Determine browser path
 	browserPath := opts.BrowserPath
 	if browserPath == "" {
 		browserPath = "chromium"
 	}
 
-	// Create browser command
 	browserCmd := exec.Command(browserPath, args...)
 
-	// Set environment variables
+	env := os.Environ()
 	if display != "" {
-		browserCmd.Env = append(os.Environ(), "DISPLAY="+display)
+		env = append(env, "DISPLAY="+display)
 	}
 	if opts.Timezone != "" {
-		browserCmd.Env = append(browserCmd.Env, "TZ="+opts.Timezone)
+		env = append(env, "TZ="+opts.Timezone)
 	}
+	browserCmd.Env = env
+
+	// Suppress browser stdout/stderr to keep logs clean
+	browserCmd.Stderr = io.Discard
+	browserCmd.Stdout = io.Discard
 
 	browserProcess = browserCmd
+	currentBrowserOps = opts
 
-	// Suppress stderr/stdout to reduce log noise (optional - comment out to see full logs)
-	browserProcess.Stderr = io.Discard
-	browserProcess.Stdout = io.Discard
-
-	err := browserProcess.Start()
-	if err != nil {
+	if err := browserProcess.Start(); err != nil {
 		return fmt.Errorf("failed to start Chromium: %w (path: %s, args: %v)", err, browserPath, args)
 	}
-
-	// Store current options
-	currentBrowserOps = opts
 
 	log.Println("Starting Chromium browser...")
 	if err := waitForBrowser(port); err != nil {
@@ -624,11 +570,12 @@ func startBrowserWithOptions(opts *BrowserOptions) error {
 		return fmt.Errorf("failed to wait for browser: %w", err)
 	}
 
-	log.Println("Chromium browser started successfully on port", port)
+	log.Printf("Chromium browser started successfully on port %s", port)
 	return nil
 }
 
-// browserOptionsMatch compares two BrowserOptions structs
+// browserOptionsMatch returns true when two BrowserOptions are functionally
+// equivalent, used to decide whether the running browser can be reused.
 func browserOptionsMatch(a, b *BrowserOptions) bool {
 	if a == nil || b == nil {
 		return a == b
@@ -656,8 +603,6 @@ func stopBrowser() {
 		browserProcess = nil
 		log.Println("Chromium browser stopped")
 	}
-
-	// Also stop Xvfb if running
 	if xvfbProcess != nil {
 		log.Println("Stopping Xvfb...")
 		xvfbProcess.Process.Kill()
@@ -678,23 +623,19 @@ func isBrowserRunning(port string) bool {
 
 // Default extraction functions
 var (
-	// Text extracts all text content from matching elements
 	Text ExtractionFunc = func(sel *goquery.Selection) string {
 		return strings.TrimSpace(sel.Text())
 	}
 
-	// FirstText extracts text content only from the first matching element
 	FirstText ExtractionFunc = func(sel *goquery.Selection) string {
 		return strings.TrimSpace(sel.First().Text())
 	}
 
-	// HTML extracts the HTML content from matching elements
 	HTML ExtractionFunc = func(sel *goquery.Selection) string {
 		html, _ := sel.Html()
 		return html
 	}
 
-	// Attr extracts attribute value from matching elements
 	Attr = func(attrName string) ExtractionFunc {
 		return func(sel *goquery.Selection) string {
 			val, exists := sel.Attr(attrName)
@@ -710,23 +651,20 @@ var (
 type PreScrapeActionType int
 
 const (
-	// ClickAction performs a click on the selected element
-	ClickAction PreScrapeActionType = iota
-	// ScrollAction scrolls to the selected element
-	ScrollAction
-	// WaitAction waits for a specified duration
-	WaitAction
+	ClickAction  PreScrapeActionType = iota // Click on an element
+	ScrollAction                            // Scroll to an element
+	WaitAction                              // Wait for a duration
 )
 
 // PreScrapeAction represents an action to be performed before scraping
 type PreScrapeAction struct {
-	Type      PreScrapeActionType // Type of action to perform
-	Selector  string              // CSS selector for the element to act on
-	Duration  time.Duration       // Duration for wait actions
-	WaitUntil string              // Selector to wait for after action (optional)
+	Type      PreScrapeActionType
+	Selector  string
+	Duration  time.Duration
+	WaitUntil string
 }
 
-// ExtractTextOrAttr extracts text content or attribute value from a selection
+// ExtractTextOrAttr extracts text content or an attribute value from a selection
 func ExtractTextOrAttr(sel *goquery.Selection, attr string) string {
 	if attr != "" {
 		val, exists := sel.Attr(attr)
@@ -738,27 +676,22 @@ func ExtractTextOrAttr(sel *goquery.Selection, attr string) string {
 	return strings.TrimSpace(sel.Text())
 }
 
-// parseWithSelectors uses reflection to populate type T using the struct's Selectors
+// parseWithSelectors uses reflection to populate type T from the parsed document.
+// Handles struct, slice-of-struct, and map result types.
 func (s *Scrapper[T]) parseWithSelectors(doc *goquery.Document, g *geziyor.Geziyor, baseUrl string, currentURL string) T {
 	var result T
 	val := reflect.ValueOf(&result).Elem()
 
-	// Check if T is a slice of structs (e.g., []MyStruct)
 	isSliceOfStruct := val.Kind() == reflect.Slice && val.Type().Elem().Kind() == reflect.Struct
 
-	// Handle Map Types
-	if val.Kind() == reflect.Map {
-		if val.IsNil() {
-			val.Set(reflect.MakeMap(val.Type()))
-		}
+	if val.Kind() == reflect.Map && val.IsNil() {
+		val.Set(reflect.MakeMap(val.Type()))
 	}
 
 	for _, sel := range s.Selectors {
 		if sel.IsArray {
-			// Extract array of individual values
 			var dataArray []string
-			selections := doc.Find(sel.Query)
-			selections.Each(func(i int, selection *goquery.Selection) {
+			doc.Find(sel.Query).Each(func(i int, selection *goquery.Selection) {
 				var data string
 				if sel.ExtractFunc != nil {
 					data = sel.ExtractFunc(selection)
@@ -814,9 +747,7 @@ func (s *Scrapper[T]) parseWithSelectors(doc *goquery.Document, g *geziyor.Geziy
 				val.SetMapIndex(reflect.ValueOf(sel.Name), reflect.ValueOf(dataArray))
 			}
 		} else {
-			// Single value extraction
 			selection := doc.Find(sel.Query)
-
 			var data string
 			if sel.ExtractFunc != nil {
 				data = sel.ExtractFunc(selection)
@@ -852,7 +783,7 @@ func (s *Scrapper[T]) parseWithSelectors(doc *goquery.Document, g *geziyor.Geziy
 		}
 	}
 
-	// Add URL to result if URLFieldName is specified and field exists
+	// Store the source URL in the result if URLFieldName is configured
 	if s.URLFieldName != "" {
 		if val.Kind() == reflect.Struct {
 			field := val.FieldByName(s.URLFieldName)
@@ -870,7 +801,7 @@ func (s *Scrapper[T]) parseWithSelectors(doc *goquery.Document, g *geziyor.Geziy
 		}
 	}
 
-	// Handle LinkHunt: find links in the page and queue them for scraping
+	// LinkHunt: find matching href links and queue them for scraping
 	if s.LinkHunt != "" {
 		doc.Find(s.LinkHunt).Each(func(i int, selection *goquery.Selection) {
 			link, exists := selection.Attr("href")
@@ -879,24 +810,23 @@ func (s *Scrapper[T]) parseWithSelectors(doc *goquery.Document, g *geziyor.Geziy
 			}
 
 			link = strings.TrimSpace(link)
-			if !strings.HasPrefix(link, "http") && !strings.HasPrefix(link, "//") && !strings.HasPrefix(link, "#") {
+			switch {
+			case strings.HasPrefix(link, "#"):
+				return
+			case strings.HasPrefix(link, "//"):
+				link = "https:" + link
+			case !strings.HasPrefix(link, "http"):
 				if strings.HasPrefix(link, "/") {
 					link = baseUrl + link
 				} else {
 					link = baseUrl + "/" + link
 				}
-			} else if strings.HasPrefix(link, "//") {
-				link = "https:" + link
-			} else if strings.HasPrefix(link, "#") {
-				return
-			} else if strings.Contains(link, baseUrl) {
-				fmt.Println("This is the link:", link)
-			} else {
-				return
+			case !strings.Contains(link, baseUrl):
+				return // Off-domain — skip
 			}
-			fmt.Println("This is the link:", link)
 
-			// Check if already visited
+			fmt.Println("LinkHunt found:", link)
+
 			s.visitedMutex.RLock()
 			_, visited := s.visitedURLs[link]
 			s.visitedMutex.RUnlock()
@@ -906,7 +836,6 @@ func (s *Scrapper[T]) parseWithSelectors(doc *goquery.Document, g *geziyor.Geziy
 				return
 			}
 
-			// Mark as visited
 			s.visitedMutex.Lock()
 			s.visitedURLs[link] = true
 			s.visitedMutex.Unlock()
@@ -916,13 +845,11 @@ func (s *Scrapper[T]) parseWithSelectors(doc *goquery.Document, g *geziyor.Geziy
 				log.Println("Failed to create request:", err)
 				return
 			}
-
 			req.Rendered = true
 
-			// Build stealth actions for the linked page
-			stealthActions := buildStealthActions(link, s.Cookies)
+			capturedLink := link
+			stealthActions := buildStealthActions(capturedLink, s.Cookies)
 
-			// Append the extraction action
 			extractAction := chromedp.ActionFunc(func(ctx context.Context) error {
 				node, err := dom.GetDocument().Do(ctx)
 				if err != nil {
@@ -932,29 +859,28 @@ func (s *Scrapper[T]) parseWithSelectors(doc *goquery.Document, g *geziyor.Geziy
 				if err != nil {
 					return err
 				}
-				doc, err := goquery.NewDocumentFromReader(strings.NewReader(body))
+				parsedDoc, err := goquery.NewDocumentFromReader(strings.NewReader(body))
 				if err != nil {
 					return err
 				}
 
-				var result T
+				var res T
 				if s.ParseFunc != nil {
-					result = s.ParseFunc(doc)
+					res = s.ParseFunc(parsedDoc)
 				} else {
-					result = s.parseWithSelectors(doc, g, baseUrl, link)
+					res = s.parseWithSelectors(parsedDoc, g, baseUrl, capturedLink)
 				}
 
-				if reflect.ValueOf(result).IsZero() {
-					fmt.Println("result is empty")
+				if reflect.ValueOf(res).IsZero() {
+					fmt.Println("result is empty, skipping")
 					return nil
 				}
 
-				s.ExportChan <- result
+				s.ExportChan <- res
 				return nil
 			})
 
 			req.Actions = append(stealthActions, extractAction)
-
 			g.Do(req, g.Opt.ParseFunc)
 		})
 	}
@@ -962,9 +888,9 @@ func (s *Scrapper[T]) parseWithSelectors(doc *goquery.Document, g *geziyor.Geziy
 	return result
 }
 
-// ScrapeStream starts scraping and returns a channel that will receive results as they are scraped
+// ScrapeStream starts scraping and returns a channel that receives results as they arrive.
+// The channel is closed once all URLs have been processed.
 func (s *Scrapper[T]) ScrapeStream() (<-chan T, error) {
-	// Use custom browser options if provided, otherwise use defaults
 	var err error
 	if s.BrowserOptions != nil {
 		err = startBrowserWithOptions(s.BrowserOptions)
@@ -975,7 +901,6 @@ func (s *Scrapper[T]) ScrapeStream() (<-chan T, error) {
 		return nil, fmt.Errorf("failed to start browser: %w", err)
 	}
 
-	// Initialize the visited URLs map
 	if s.visitedURLs == nil {
 		s.visitedURLs = make(map[string]bool)
 	}
@@ -985,7 +910,6 @@ func (s *Scrapper[T]) ScrapeStream() (<-chan T, error) {
 	g := geziyor.NewGeziyor(&geziyor.Options{
 		StartRequestsFunc: func(g *geziyor.Geziyor) {
 			for _, u := range s.Urls {
-				// Check if already visited
 				s.visitedMutex.RLock()
 				_, visited := s.visitedURLs[u]
 				s.visitedMutex.RUnlock()
@@ -995,7 +919,6 @@ func (s *Scrapper[T]) ScrapeStream() (<-chan T, error) {
 					continue
 				}
 
-				// Mark as visited
 				s.visitedMutex.Lock()
 				s.visitedURLs[u] = true
 				s.visitedMutex.Unlock()
@@ -1011,56 +934,50 @@ func (s *Scrapper[T]) ScrapeStream() (<-chan T, error) {
 					log.Println("Failed to parse url:", err)
 					continue
 				}
-				baseUrl := ur.Scheme + "://" + ur.Host
 
 				req.Rendered = true
 
-				// Capture loop variable for closure
+				// Capture loop variables for closures
 				currentURL := u
-				currentBaseURL := baseUrl
+				currentBaseURL := ur.Scheme + "://" + ur.Host
 
-				// Build stealth actions for the initial URL
 				stealthActions := buildStealthActions(currentURL, s.Cookies)
 
-				// Build pre-scrape user-defined actions
+				// User-defined pre-scrape actions
 				var preScrapeActions []chromedp.Action
 				for _, action := range s.PreScrapeActions {
 					a := action
 					switch a.Type {
 					case ClickAction:
 						preScrapeActions = append(preScrapeActions, chromedp.ActionFunc(func(ctx context.Context) error {
-							err := chromedp.Click(a.Selector).Do(ctx)
-							if err != nil {
-								log.Printf("Error clicking element %s: %v", a.Selector, err)
+							if err := chromedp.Click(a.Selector).Do(ctx); err != nil {
+								log.Printf("Error clicking %s: %v", a.Selector, err)
 								return nil
 							}
 							if a.WaitUntil != "" {
-								if err = chromedp.WaitVisible(a.WaitUntil).Do(ctx); err != nil {
-									log.Printf("Error waiting for element %s: %v", a.WaitUntil, err)
+								if err := chromedp.WaitVisible(a.WaitUntil).Do(ctx); err != nil {
+									log.Printf("Error waiting for %s: %v", a.WaitUntil, err)
 								}
 							} else {
 								time.Sleep(1 * time.Second)
 							}
 							return nil
 						}))
-
 					case ScrollAction:
 						preScrapeActions = append(preScrapeActions, chromedp.ActionFunc(func(ctx context.Context) error {
-							err := chromedp.ScrollIntoView(a.Selector).Do(ctx)
-							if err != nil {
-								log.Printf("Error scrolling to element %s: %v", a.Selector, err)
+							if err := chromedp.ScrollIntoView(a.Selector).Do(ctx); err != nil {
+								log.Printf("Error scrolling to %s: %v", a.Selector, err)
 								return nil
 							}
 							if a.WaitUntil != "" {
-								if err = chromedp.WaitVisible(a.WaitUntil).Do(ctx); err != nil {
-									log.Printf("Error waiting for element %s: %v", a.WaitUntil, err)
+								if err := chromedp.WaitVisible(a.WaitUntil).Do(ctx); err != nil {
+									log.Printf("Error waiting for %s: %v", a.WaitUntil, err)
 								}
 							} else {
 								time.Sleep(1 * time.Second)
 							}
 							return nil
 						}))
-
 					case WaitAction:
 						preScrapeActions = append(preScrapeActions, chromedp.ActionFunc(func(ctx context.Context) error {
 							time.Sleep(a.Duration)
@@ -1069,7 +986,7 @@ func (s *Scrapper[T]) ScrapeStream() (<-chan T, error) {
 					}
 				}
 
-				// Build the HTML extraction action
+				// Final extraction action
 				extractAction := chromedp.ActionFunc(func(ctx context.Context) error {
 					node, err := dom.GetDocument().Do(ctx)
 					if err != nil {
@@ -1079,7 +996,6 @@ func (s *Scrapper[T]) ScrapeStream() (<-chan T, error) {
 					if err != nil {
 						return err
 					}
-
 					doc, err := goquery.NewDocumentFromReader(strings.NewReader(body))
 					if err != nil {
 						return err
@@ -1099,9 +1015,8 @@ func (s *Scrapper[T]) ScrapeStream() (<-chan T, error) {
 					return nil
 				})
 
-				// Combine: stealth actions + pre-scrape actions + extraction
+				// Action order: stealth → pre-scrape → extract
 				req.Actions = append(stealthActions, append(preScrapeActions, extractAction)...)
-
 				g.Do(req, g.Opt.ParseFunc)
 			}
 		},
@@ -1112,11 +1027,9 @@ func (s *Scrapper[T]) ScrapeStream() (<-chan T, error) {
 		LogDisabled:                 s.LogDisabled,
 		ConcurrentRequests:          s.ConcurrentRequests,
 		ConcurrentRequestsPerDomain: s.ConcurrentRequestsPerDomain,
-
 		ErrorFunc: func(g *geziyor.Geziyor, r *client.Request, err error) {
 			log.Printf("Error during request: %v for URL: %s", err, r.URL.String())
 		},
-
 		UserAgent: s.UserAgent,
 	})
 
@@ -1131,7 +1044,8 @@ func (s *Scrapper[T]) ScrapeStream() (<-chan T, error) {
 	return s.ExportChan, nil
 }
 
-// Scrape collects all results before returning (backward compatible wrapper around ScrapeStream)
+// Scrape is a blocking wrapper around ScrapeStream that collects all results
+// before returning. Maintains full backward compatibility.
 func (s *Scrapper[T]) Scrape() ([]T, error) {
 	streamChan, err := s.ScrapeStream()
 	if err != nil {
@@ -1146,7 +1060,7 @@ func (s *Scrapper[T]) Scrape() ([]T, error) {
 	return results, nil
 }
 
-// CloseBrowser manually closes the browser instance if it's running
+// CloseBrowser manually stops the browser. Only needed when KeepBrowserOpen is true.
 func (s *Scrapper[T]) CloseBrowser() {
 	stopBrowser()
 }
